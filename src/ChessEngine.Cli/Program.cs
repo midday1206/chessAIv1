@@ -27,7 +27,7 @@ IMoveFormatter moveFormatter = new SanMoveFormatter();
 // Tried in order: SAN ("Nf3", "exd5", "O-O") first, then UCI long algebraic ("g1f3") as a fallback.
 IMoveParser[] moveParsers = { new SanMoveParser(), new UciMoveParser() };
 
-IMoveSearcher searcher = new MinimaxSearch(new MaterialEvaluator());
+IMoveSearcher searcher = new MinimaxSearch(new PieceSquareEvaluator());
 const int defaultSearchDepth = 3;
 
 Color openingSide = board.SideToMove;

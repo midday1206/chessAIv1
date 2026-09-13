@@ -1,7 +1,11 @@
 namespace ChessEngine.Core.Evaluation;
 
-/// <summary>Scores a position purely by the standard material point values (pawn=100 ... queen=900).</summary>
-public sealed class MaterialEvaluator : IPositionEvaluator
+/// <summary>
+/// Scores a position by material plus piece-square placement bonuses (PieceSquareTables),
+/// so the engine values central control, pawn advancement, and early king safety rather
+/// than treating every legal move as equally good.
+/// </summary>
+public sealed class PieceSquareEvaluator : IPositionEvaluator
 {
     public int Evaluate(Board board)
     {
@@ -14,7 +18,9 @@ public sealed class MaterialEvaluator : IPositionEvaluator
                 Piece piece = board.GetPiece(file, rank);
                 if (piece.IsNone) continue;
 
-                int value = PieceValues.Values[piece.Type];
+                int value = PieceValues.Values[piece.Type]
+                    + PieceSquareTables.GetValue(piece.Type, piece.Color, file, rank);
+
                 score += piece.Color == Color.White ? value : -value;
             }
         }

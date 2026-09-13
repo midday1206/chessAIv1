@@ -1,6 +1,7 @@
 using ChessEngine.Core;
 using ChessEngine.Core.Evaluation;
 using ChessEngine.Core.Moves;
+using ChessEngine.Core.Notation;
 using ChessEngine.Core.Search;
 
 namespace ChessEngine.Tests;
@@ -63,5 +64,21 @@ public class MinimaxSearchTests
         Board board = Board.CreateStartingPosition();
 
         Assert.Throws<ArgumentOutOfRangeException>(() => _search.FindBestMove(board, depth: 0));
+    }
+
+    [Test]
+    public void FindBestMove_WithPieceSquareEvaluator_PrefersDevelopmentOverAimlessFlankPawnPushes()
+    {
+        // With material alone every quiet opening move ties at depth 1, so the engine has no
+        // reason to prefer developing a piece over pushing a rim pawn. Piece-square tables
+        // should break that tie in favor of central/development moves.
+        var search = new MinimaxSearch(new PieceSquareEvaluator());
+        Board board = Board.CreateStartingPosition();
+
+        Move? move = search.FindBestMove(board, depth: 1);
+
+        Assert.That(move, Is.Not.Null);
+        string san = new SanMoveFormatter().Format(board, move!.Value);
+        Assert.That(san, Is.Not.AnyOf("a3", "a4", "h3", "h4"));
     }
 }

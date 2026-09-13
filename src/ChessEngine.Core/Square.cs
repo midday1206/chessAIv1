@@ -26,6 +26,10 @@ public readonly struct Square : IEquatable<Square>
 
         int file = char.ToLowerInvariant(algebraic[0]) - 'a';
         int rank = algebraic[1] - '1';
+
+        if (file is < 0 or > 7 || rank is < 0 or > 7)
+            throw new FormatException($"'{algebraic}' is not a valid algebraic square.");
+
         return new Square(file, rank);
     }
 

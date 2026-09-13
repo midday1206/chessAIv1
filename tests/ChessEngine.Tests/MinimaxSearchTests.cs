@@ -67,6 +67,22 @@ public class MinimaxSearchTests
     }
 
     [Test]
+    public void FindBestMove_AtShallowDepth_StillAvoidsABadTradeThanksToQuiescence()
+    {
+        // Same trap as FindBestMove_AvoidsACaptureThatLosesTheQueenForLess, but searched to
+        // only 1 ply. Without quiescence, the leaf evaluation right after Qxd5 looks great
+        // (queen just won a knight) and the search would never see the pawn recapture -
+        // exactly the horizon effect quiescence search exists to fix.
+        Board board = Board.FromFen("k7/8/4p3/3n4/8/8/P7/K2Q4 w - - 0 1");
+
+        Move? move = _search.FindBestMove(board, depth: 1);
+
+        Assert.That(move, Is.Not.Null);
+        Assert.That(move!.Value.From == Square.FromAlgebraic("d1") && move.Value.To == Square.FromAlgebraic("d5"),
+            Is.False, "quiescence search should see the pawn recapture even at depth 1");
+    }
+
+    [Test]
     public void FindBestMove_WithPieceSquareEvaluator_PrefersDevelopmentOverAimlessFlankPawnPushes()
     {
         // With material alone every quiet opening move ties at depth 1, so the engine has no

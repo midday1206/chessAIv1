@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using ChessEngine.Core.Evaluation;
 using ChessEngine.Core.Moves;
 
@@ -9,11 +10,16 @@ namespace ChessEngine.Core.Search;
 /// Fixed-depth minimax search with alpha-beta pruning, implemented as negamax (the position
 /// is always scored from the side-to-move's perspective, negating as the recursion unwinds).
 /// Checkmate/stalemate are treated as exact terminal scores rather than left to the evaluator.
+/// Leaf nodes are resolved with a quiescence search (see Quiescence) instead of evaluated
+/// statically, so the search doesn't stop mid-exchange and misjudge who actually wins material.
+/// Moves are tried captures-first (MVV-LVA) so alpha-beta finds strong refutations sooner -
+/// without it, quiescence's extra nodes make deeper searches too slow to be interactive.
 /// </summary>
 public sealed class MinimaxSearch : IMoveSearcher
 {
     private const int MateScore = 1_000_000;
     private const int Infinity = int.MaxValue;
+    private const int MaxQuiescenceDepth = 4;
 
     private readonly IPositionEvaluator _evaluator;
 
@@ -32,7 +38,7 @@ public sealed class MinimaxSearch : IMoveSearcher
         int alpha = -Infinity;
         const int beta = Infinity;
 
-        foreach (Move move in legalMoves)
+        foreach (Move move in OrderMoves(board, legalMoves))
         {
             Board next = board.Clone();
             next.ApplyMove(move);
@@ -52,13 +58,14 @@ public sealed class MinimaxSearch : IMoveSearcher
 
     private int Negamax(Board board, int depthRemaining, int alpha, int beta)
     {
-        GameStatus status = MoveGenerator.GetGameStatus(board);
-        if (status == GameStatus.Checkmate) return -(MateScore + depthRemaining);
-        if (status == GameStatus.Stalemate) return 0;
-        if (depthRemaining == 0) return Perspective(board) * _evaluator.Evaluate(board);
+        bool inCheck = MoveGenerator.IsInCheck(board, board.SideToMove);
+        List<Move> legalMoves = MoveGenerator.GenerateLegalMoves(board);
+
+        if (legalMoves.Count == 0) return inCheck ? -(MateScore + depthRemaining) : 0;
+        if (depthRemaining == 0) return Quiescence(board, alpha, beta, 0);
 
         int best = -Infinity;
-        foreach (Move move in MoveGenerator.GenerateLegalMoves(board))
+        foreach (Move move in OrderMoves(board, legalMoves))
         {
             Board next = board.Clone();
             next.ApplyMove(move);
@@ -70,6 +77,70 @@ public sealed class MinimaxSearch : IMoveSearcher
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// Extends the search past the depth horizon along "noisy" lines only (captures and
+    /// promotions, or every legal move while in check - a check can't just be ignored) until
+    /// the position quiets down, so an in-progress exchange is never evaluated mid-trade.
+    /// The side to move may always "stand pat" (decline to continue trading), which both
+    /// bounds the recursion and lets a bad trade be refused.
+    /// </summary>
+    private int Quiescence(Board board, int alpha, int beta, int qDepth)
+    {
+        bool inCheck = MoveGenerator.IsInCheck(board, board.SideToMove);
+        List<Move> legalMoves = MoveGenerator.GenerateLegalMoves(board);
+
+        if (legalMoves.Count == 0) return inCheck ? -MateScore : 0;
+
+        int standPat = Perspective(board) * _evaluator.Evaluate(board);
+
+        if (!inCheck)
+        {
+            if (standPat >= beta) return beta;
+            if (standPat > alpha) alpha = standPat;
+        }
+
+        if (qDepth >= MaxQuiescenceDepth) return inCheck ? alpha : Math.Max(alpha, standPat);
+
+        IEnumerable<Move> candidates = inCheck ? legalMoves : legalMoves.Where(m => m.IsCapture || m.IsPromotion);
+
+        foreach (Move move in OrderMoves(board, candidates))
+        {
+            Board next = board.Clone();
+            next.ApplyMove(move);
+            int score = -Quiescence(next, -beta, -alpha, qDepth + 1);
+
+            if (score >= beta) return beta;
+            if (score > alpha) alpha = score;
+        }
+
+        return alpha;
+    }
+
+    /// <summary>
+    /// Orders moves captures-first (biggest expected material swing first, MVV-LVA), with
+    /// promotions boosted too. This is what makes alpha-beta pruning actually effective -
+    /// a good move tried early prunes far more of the tree than one tried late.
+    /// </summary>
+    private static IEnumerable<Move> OrderMoves(Board board, IEnumerable<Move> moves) =>
+        moves.OrderByDescending(m => MoveOrderingScore(board, m));
+
+    private static int MoveOrderingScore(Board board, Move move)
+    {
+        int score = 0;
+
+        if (move.IsCapture)
+        {
+            PieceType victim = move.IsEnPassant ? PieceType.Pawn : board.GetPiece(move.To).Type;
+            PieceType attacker = board.GetPiece(move.From).Type;
+            // Most Valuable Victim, Least Valuable Attacker: prefer big captures with cheap pieces.
+            score += (PieceValues.Values[victim] * 10) - PieceValues.Values[attacker];
+        }
+
+        if (move.IsPromotion) score += PieceValues.Values[move.Promotion];
+
+        return score;
     }
 
     private static int Perspective(Board board) => board.SideToMove == Color.White ? 1 : -1;

@@ -1,12 +1,13 @@
 using System.Text;
 using ChessEngine.Core;
+using ChessEngine.Core.Output;
 
 namespace ChessEngine.Cli;
 
-/// <summary>Renders a Board as a human-readable text grid for the console.</summary>
-public static class BoardRenderer
+/// <summary>Console adapter for IBoardRenderer: renders a Board as a plain-text grid.</summary>
+public sealed class TextBoardRenderer : IBoardRenderer
 {
-    public static string Render(Board board)
+    public string Render(Board board)
     {
         var sb = new StringBuilder();
 

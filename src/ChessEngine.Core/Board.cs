@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Text;
+using ChessEngine.Core.Moves;
 
 namespace ChessEngine.Core;
 
@@ -36,6 +37,108 @@ public class Board
     public void SetPiece(Square square, Piece piece) => _squares[square.Rank, square.File] = piece;
 
     public void SetPiece(int file, int rank, Piece piece) => _squares[rank, file] = piece;
+
+    /// <summary>Finds the square of the given color's king. Throws if the board has none.</summary>
+    public Square FindKing(Color color)
+    {
+        for (int rank = 0; rank < BoardSize; rank++)
+        {
+            for (int file = 0; file < BoardSize; file++)
+            {
+                Piece piece = GetPiece(file, rank);
+                if (piece.Type == PieceType.King && piece.Color == color)
+                    return new Square(file, rank);
+            }
+        }
+
+        throw new InvalidOperationException($"No {color} king found on the board.");
+    }
+
+    /// <summary>Creates an independent deep copy of this board.</summary>
+    public Board Clone()
+    {
+        var clone = new Board
+        {
+            SideToMove = SideToMove,
+            Castling = Castling,
+            EnPassantTarget = EnPassantTarget,
+            HalfmoveClock = HalfmoveClock,
+            FullmoveNumber = FullmoveNumber
+        };
+
+        for (int rank = 0; rank < BoardSize; rank++)
+            for (int file = 0; file < BoardSize; file++)
+                clone.SetPiece(file, rank, GetPiece(file, rank));
+
+        return clone;
+    }
+
+    /// <summary>
+    /// Mutates this board by playing a pseudo-legal move: moves the piece, resolves captures
+    /// (including en passant), moves the rook for castling, applies promotions, and updates
+    /// castling rights, the en passant target, the move clocks, and the side to move.
+    /// This does not verify legality (e.g. that the mover isn't left in check) - see MoveGenerator.
+    /// </summary>
+    public void ApplyMove(Move move)
+    {
+        Piece moving = GetPiece(move.From);
+        bool isPawnMove = moving.Type == PieceType.Pawn;
+        bool isCapture = move.IsCapture;
+
+        if (move.IsEnPassant)
+        {
+            var capturedPawnSquare = new Square(move.To.File, move.From.Rank);
+            SetPiece(capturedPawnSquare, Piece.None);
+        }
+
+        SetPiece(move.From, Piece.None);
+        SetPiece(move.To, move.IsPromotion ? new Piece(move.Promotion, moving.Color) : moving);
+
+        if (move.IsCastling)
+        {
+            int rank = move.From.Rank;
+            bool isKingside = move.To.File > move.From.File;
+            var rookFrom = new Square(isKingside ? 7 : 0, rank);
+            var rookTo = new Square(isKingside ? 5 : 3, rank);
+            SetPiece(rookTo, GetPiece(rookFrom));
+            SetPiece(rookFrom, Piece.None);
+        }
+
+        UpdateCastlingRights(move, moving);
+
+        EnPassantTarget = move.IsDoublePawnPush
+            ? new Square(move.From.File, (move.From.Rank + move.To.Rank) / 2)
+            : null;
+
+        HalfmoveClock = isPawnMove || isCapture ? 0 : HalfmoveClock + 1;
+        if (SideToMove == Color.Black) FullmoveNumber++;
+        SideToMove = SideToMove.Opposite();
+    }
+
+    private void UpdateCastlingRights(Move move, Piece moving)
+    {
+        if (moving.Type == PieceType.King)
+        {
+            Castling &= moving.Color == Color.White
+                ? ~(CastlingRights.WhiteKingside | CastlingRights.WhiteQueenside)
+                : ~(CastlingRights.BlackKingside | CastlingRights.BlackQueenside);
+        }
+
+        ClearCastlingRightIfRookSquare(move.From);
+        ClearCastlingRightIfRookSquare(move.To);
+    }
+
+    private void ClearCastlingRightIfRookSquare(Square square)
+    {
+        Castling &= (square.File, square.Rank) switch
+        {
+            (0, 0) => ~CastlingRights.WhiteQueenside,
+            (7, 0) => ~CastlingRights.WhiteKingside,
+            (0, 7) => ~CastlingRights.BlackQueenside,
+            (7, 7) => ~CastlingRights.BlackKingside,
+            _ => ~CastlingRights.None
+        };
+    }
 
     public static Board CreateStartingPosition() => FromFen(StartingFen);
 

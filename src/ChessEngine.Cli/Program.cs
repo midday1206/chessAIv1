@@ -1,5 +1,6 @@
 using ChessEngine.Cli;
 using ChessEngine.Core;
+using ChessEngine.Core.Output;
 
 string fen = args.Length > 0 ? string.Join(' ', args) : Board.StartingFen;
 
@@ -14,7 +15,8 @@ catch (Exception ex) when (ex is FormatException or ArgumentException)
     return 1;
 }
 
-Console.WriteLine(BoardRenderer.Render(board));
+IBoardRenderer renderer = new TextBoardRenderer();
+Console.WriteLine(renderer.Render(board));
 Console.WriteLine();
 Console.WriteLine($"FEN: {board.ToFen()}");
 

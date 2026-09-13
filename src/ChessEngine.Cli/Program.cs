@@ -1,5 +1,6 @@
 using ChessEngine.Cli;
 using ChessEngine.Core;
+using ChessEngine.Core.Moves;
 using ChessEngine.Core.Output;
 
 string fen = args.Length > 0 ? string.Join(' ', args) : Board.StartingFen;
@@ -15,9 +16,13 @@ catch (Exception ex) when (ex is FormatException or ArgumentException)
     return 1;
 }
 
-IBoardRenderer renderer = new TextBoardRenderer();
-Console.WriteLine(renderer.Render(board));
+IBoardRenderer boardRenderer = new TextBoardRenderer();
+IGameStatusRenderer statusRenderer = new TextGameStatusRenderer();
+GameStatus status = MoveGenerator.GetGameStatus(board);
+
+Console.WriteLine(boardRenderer.Render(board));
 Console.WriteLine();
 Console.WriteLine($"FEN: {board.ToFen()}");
+Console.WriteLine(statusRenderer.Render(board, status));
 
 return 0;

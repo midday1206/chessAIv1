@@ -92,6 +92,24 @@ public static class MoveGenerator
         return legalMoves;
     }
 
+    /// <summary>Whether the given color's king is currently attacked.</summary>
+    public static bool IsInCheck(Board board, Color color) =>
+        IsSquareAttacked(board, board.FindKing(color), color.Opposite());
+
+    /// <summary>
+    /// Classifies the position for the side to move: Checkmate/Stalemate when it has no legal
+    /// moves (depending on whether it's in check), Check when it has legal moves but is in
+    /// check, otherwise InProgress.
+    /// </summary>
+    public static GameStatus GetGameStatus(Board board)
+    {
+        bool inCheck = IsInCheck(board, board.SideToMove);
+        bool hasLegalMoves = GenerateLegalMoves(board).Count > 0;
+
+        if (hasLegalMoves) return inCheck ? GameStatus.Check : GameStatus.InProgress;
+        return inCheck ? GameStatus.Checkmate : GameStatus.Stalemate;
+    }
+
     /// <summary>Whether the given square is attacked by any piece of the given color.</summary>
     public static bool IsSquareAttacked(Board board, Square square, Color byColor)
     {

@@ -1,9 +1,11 @@
 using System.Text;
 using ChessEngine.Cli;
 using ChessEngine.Core;
+using ChessEngine.Core.Evaluation;
 using ChessEngine.Core.Moves;
 using ChessEngine.Core.Notation;
 using ChessEngine.Core.Output;
+using ChessEngine.Core.Search;
 
 string startingFen = args.Length > 0 ? string.Join(' ', args) : Board.StartingFen;
 
@@ -25,6 +27,9 @@ IMoveFormatter moveFormatter = new SanMoveFormatter();
 // Tried in order: SAN ("Nf3", "exd5", "O-O") first, then UCI long algebraic ("g1f3") as a fallback.
 IMoveParser[] moveParsers = { new SanMoveParser(), new UciMoveParser() };
 
+IMoveSearcher searcher = new MinimaxSearch(new MaterialEvaluator());
+const int defaultSearchDepth = 3;
+
 Color openingSide = board.SideToMove;
 int openingFullmove = board.FullmoveNumber;
 var moveHistory = new List<string>();
@@ -44,7 +49,7 @@ while (true)
     if (status is GameStatus.Checkmate or GameStatus.Stalemate)
         return 0;
 
-    Console.Write("Move (SAN like Nf3, or UCI like g1f3; 'quit' to exit): ");
+    Console.Write("Move (SAN/UCI), 'go [depth]' for the engine to move, 'quit' to exit: ");
     string? input = Console.ReadLine();
     string trimmed = input?.Trim('﻿', ' ', '\t').Trim() ?? "quit";
 
@@ -52,6 +57,28 @@ while (true)
         trimmed.Equals("exit", StringComparison.OrdinalIgnoreCase))
     {
         return 0;
+    }
+
+    if (trimmed.Equals("go", StringComparison.OrdinalIgnoreCase) ||
+        trimmed.StartsWith("go ", StringComparison.OrdinalIgnoreCase))
+    {
+        int depth = defaultSearchDepth;
+        string[] parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length > 1 && int.TryParse(parts[1], out int requestedDepth) && requestedDepth > 0)
+            depth = requestedDepth;
+
+        Move? engineMove = searcher.FindBestMove(board, depth);
+        if (engineMove is null)
+        {
+            Console.WriteLine("Engine has no legal move.");
+            continue;
+        }
+
+        string engineSan = moveFormatter.Format(board, engineMove.Value);
+        Console.WriteLine($"Engine plays: {engineSan} (depth {depth})");
+        moveHistory.Add(engineSan);
+        board.ApplyMove(engineMove.Value);
+        continue;
     }
 
     Move? parsedMove = null;

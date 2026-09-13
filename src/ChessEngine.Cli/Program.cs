@@ -28,7 +28,7 @@ IMoveFormatter moveFormatter = new SanMoveFormatter();
 IMoveParser[] moveParsers = { new SanMoveParser(), new UciMoveParser() };
 
 IMoveSearcher searcher = new MinimaxSearch(new PieceSquareEvaluator());
-const int defaultSearchDepth = 3;
+const int defaultSearchDepth = 4;
 
 Color openingSide = board.SideToMove;
 int openingFullmove = board.FullmoveNumber;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using ChessEngine.Core.Evaluation;
 using ChessEngine.Core.Moves;
 
@@ -25,7 +26,7 @@ public sealed class MinimaxSearch : IMoveSearcher
 
     public MinimaxSearch(IPositionEvaluator evaluator) => _evaluator = evaluator;
 
-    public Move? FindBestMove(Board board, int depth)
+    public Move? FindBestMove(Board board, int depth, CancellationToken cancellationToken = default)
     {
         if (depth < 1)
             throw new ArgumentOutOfRangeException(nameof(depth), depth, "Search depth must be at least 1 ply.");
@@ -40,9 +41,11 @@ public sealed class MinimaxSearch : IMoveSearcher
 
         foreach (Move move in OrderMoves(board, legalMoves))
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             Board next = board.Clone();
             next.ApplyMove(move);
-            int score = -Negamax(next, depth - 1, -beta, -alpha);
+            int score = -Negamax(next, depth - 1, -beta, -alpha, cancellationToken);
 
             if (bestMove is null || score > bestScore)
             {
@@ -56,20 +59,22 @@ public sealed class MinimaxSearch : IMoveSearcher
         return bestMove;
     }
 
-    private int Negamax(Board board, int depthRemaining, int alpha, int beta)
+    private int Negamax(Board board, int depthRemaining, int alpha, int beta, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         bool inCheck = MoveGenerator.IsInCheck(board, board.SideToMove);
         List<Move> legalMoves = MoveGenerator.GenerateLegalMoves(board);
 
         if (legalMoves.Count == 0) return inCheck ? -(MateScore + depthRemaining) : 0;
-        if (depthRemaining == 0) return Quiescence(board, alpha, beta, 0);
+        if (depthRemaining == 0) return Quiescence(board, alpha, beta, 0, cancellationToken);
 
         int best = -Infinity;
         foreach (Move move in OrderMoves(board, legalMoves))
         {
             Board next = board.Clone();
             next.ApplyMove(move);
-            int score = -Negamax(next, depthRemaining - 1, -beta, -alpha);
+            int score = -Negamax(next, depthRemaining - 1, -beta, -alpha, cancellationToken);
 
             if (score > best) best = score;
             if (best > alpha) alpha = best;
@@ -86,8 +91,10 @@ public sealed class MinimaxSearch : IMoveSearcher
     /// The side to move may always "stand pat" (decline to continue trading), which both
     /// bounds the recursion and lets a bad trade be refused.
     /// </summary>
-    private int Quiescence(Board board, int alpha, int beta, int qDepth)
+    private int Quiescence(Board board, int alpha, int beta, int qDepth, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         bool inCheck = MoveGenerator.IsInCheck(board, board.SideToMove);
         List<Move> legalMoves = MoveGenerator.GenerateLegalMoves(board);
 
@@ -109,7 +116,7 @@ public sealed class MinimaxSearch : IMoveSearcher
         {
             Board next = board.Clone();
             next.ApplyMove(move);
-            int score = -Quiescence(next, -beta, -alpha, qDepth + 1);
+            int score = -Quiescence(next, -beta, -alpha, qDepth + 1, cancellationToken);
 
             if (score >= beta) return beta;
             if (score > alpha) alpha = score;

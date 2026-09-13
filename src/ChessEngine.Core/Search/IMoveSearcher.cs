@@ -1,3 +1,4 @@
+using System.Threading;
 using ChessEngine.Core.Moves;
 
 namespace ChessEngine.Core.Search;
@@ -9,6 +10,10 @@ namespace ChessEngine.Core.Search;
 /// </summary>
 public interface IMoveSearcher
 {
-    /// <summary>Searches to the given depth (in plies) and returns the best move, or null if there is none.</summary>
-    Move? FindBestMove(Board board, int depth);
+    /// <summary>
+    /// Searches to the given depth (in plies) and returns the best move, or null if there is
+    /// none. Cancelling <paramref name="cancellationToken"/> aborts the search (e.g. a
+    /// background ponder made stale by a move actually being played) via OperationCanceledException.
+    /// </summary>
+    Move? FindBestMove(Board board, int depth, CancellationToken cancellationToken = default);
 }

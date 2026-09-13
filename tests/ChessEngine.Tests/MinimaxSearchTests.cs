@@ -1,3 +1,4 @@
+using System.Threading;
 using ChessEngine.Core;
 using ChessEngine.Core.Evaluation;
 using ChessEngine.Core.Moves;
@@ -64,6 +65,16 @@ public class MinimaxSearchTests
         Board board = Board.CreateStartingPosition();
 
         Assert.Throws<ArgumentOutOfRangeException>(() => _search.FindBestMove(board, depth: 0));
+    }
+
+    [Test]
+    public void FindBestMove_Throws_WhenCancelledBeforeStarting()
+    {
+        Board board = Board.CreateStartingPosition();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() => _search.FindBestMove(board, depth: 4, cts.Token));
     }
 
     [Test]

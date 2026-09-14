@@ -96,4 +96,47 @@ public class OpeningBookTests
 
         Assert.That(book.Count, Is.EqualTo(0));
     }
+
+    [Test]
+    public void IsLocked_IsFalseByDefault_AndTrueAfterALockedRecord()
+    {
+        var book = new OpeningBook();
+        Board board = Board.CreateStartingPosition();
+        var move = new Move(Square.FromAlgebraic("d2"), Square.FromAlgebraic("d4"), flags: MoveFlags.DoublePawnPush);
+
+        book.Record(board, move);
+        Assert.That(book.IsLocked(board), Is.False);
+
+        book.Record(board, move, locked: true);
+        Assert.That(book.IsLocked(board), Is.True);
+    }
+
+    [Test]
+    public void IsLocked_OnUnknownPosition_IsFalse()
+    {
+        var book = new OpeningBook();
+
+        Assert.That(book.IsLocked(Board.CreateStartingPosition()), Is.False);
+    }
+
+    [Test]
+    public void SaveAndLoad_RoundTripsTheLockedFlag()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"opening-book-test-{Path.GetRandomFileName()}.json");
+        try
+        {
+            var book = new OpeningBook();
+            Board board = Board.CreateStartingPosition();
+            book.Record(board, new Move(Square.FromAlgebraic("d2"), Square.FromAlgebraic("d4"), flags: MoveFlags.DoublePawnPush), locked: true);
+            book.Save(path);
+
+            OpeningBook loaded = OpeningBook.Load(path);
+
+            Assert.That(loaded.IsLocked(board), Is.True);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }

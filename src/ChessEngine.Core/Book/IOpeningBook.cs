@@ -11,6 +11,13 @@ public interface IOpeningBook
     /// <summary>Looks up a previously recorded move for this exact position, if any.</summary>
     bool TryGetMove(Board board, out Moves.Move move);
 
-    /// <summary>Records (or overwrites) the move played from this position.</summary>
-    void Record(Board board, Moves.Move move);
+    /// <summary>
+    /// Records (or overwrites) the move played from this position. A <paramref name="locked"/>
+    /// entry (a deliberately chosen repertoire move) is protected: callers doing automated
+    /// re-analysis should check <see cref="IsLocked"/> and skip overwriting it.
+    /// </summary>
+    void Record(Board board, Moves.Move move, bool locked = false);
+
+    /// <summary>Whether the position has a recorded move that's protected from being overwritten.</summary>
+    bool IsLocked(Board board);
 }

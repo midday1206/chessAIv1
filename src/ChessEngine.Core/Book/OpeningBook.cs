@@ -38,7 +38,11 @@ public sealed class OpeningBook : IOpeningBook
         return false;
     }
 
-    public void Record(Board board, Move move) => _entries[PositionKey(board)] = BookEntry.FromMove(move);
+    public void Record(Board board, Move move, bool locked = false) =>
+        _entries[PositionKey(board)] = BookEntry.FromMove(move, locked);
+
+    public bool IsLocked(Board board) =>
+        _entries.TryGetValue(PositionKey(board), out BookEntry entry) && entry.Locked;
 
     public void Save(string path)
     {
@@ -58,11 +62,11 @@ public sealed class OpeningBook : IOpeningBook
     private static string PositionKey(Board board) =>
         string.Join(' ', board.ToFen().Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(4));
 
-    private readonly record struct BookEntry(int FromFile, int FromRank, int ToFile, int ToRank, string Promotion, string Flags)
+    private readonly record struct BookEntry(int FromFile, int FromRank, int ToFile, int ToRank, string Promotion, string Flags, bool Locked)
     {
-        public static BookEntry FromMove(Move move) => new(
+        public static BookEntry FromMove(Move move, bool locked) => new(
             move.From.File, move.From.Rank, move.To.File, move.To.Rank,
-            move.Promotion.ToString(), move.Flags.ToString());
+            move.Promotion.ToString(), move.Flags.ToString(), locked);
 
         public Move ToMove() => new(
             new Square(FromFile, FromRank),

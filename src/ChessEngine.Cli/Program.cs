@@ -94,7 +94,7 @@ while (true)
 
     StartPondering(board);
 
-    Console.Write("Move (SAN/UCI), 'go [depth]' for the engine to move, 'quit' to exit: ");
+    Console.Write("Move (SAN/UCI), 'go [depth]', 'book teach <moves>', 'quit' to exit: ");
     string? input = Console.ReadLine();
     string trimmed = input?.Trim('﻿', ' ', '\t').Trim() ?? "quit";
 
@@ -104,6 +104,12 @@ while (true)
         ponderCts?.Cancel();
         AnalyzeAndSaveBook();
         return 0;
+    }
+
+    if (trimmed.StartsWith("book teach ", StringComparison.OrdinalIgnoreCase))
+    {
+        TeachRepertoireLine(trimmed[11..]);
+        continue;
     }
 
     if (trimmed.Equals("go", StringComparison.OrdinalIgnoreCase) ||
@@ -205,6 +211,13 @@ void AnalyzeAndSaveBook()
     for (int i = 0; i < bookPhasePositions.Count; i++)
     {
         Board position = bookPhasePositions[i];
+
+        if (openingBook.IsLocked(position))
+        {
+            Console.WriteLine($"  [{i + 1}/{bookPhasePositions.Count}] {position.ToFen()} -> kept (locked repertoire move)");
+            continue;
+        }
+
         Move? best = searcher.FindBestMove(position, bookAnalysisDepth);
         if (best is null) continue;
 
@@ -215,6 +228,95 @@ void AnalyzeAndSaveBook()
 
     openingBook.Save(bookPath);
     Console.WriteLine($"Opening book saved: {openingBook.Count} position(s) -> {bookPath}");
+}
+
+// Feeds a space-separated SAN/UCI move list from the starting position (independent of the
+// live game board) and locks each resulting position's move as a deliberately chosen
+// repertoire entry, so AnalyzeAndSaveBook's post-game re-analysis will never overwrite it.
+//
+// An optional leading "--as white|black" restricts locking to positions where that color is
+// to move. This matters for a repertoire line that exists to prepare a reply to an opponent's
+// choice (e.g. "how Black meets 1.e4"): the opponent's own moves in that illustrative line
+// aren't something we're prescribing, and different reply lines can share the very same
+// starting position - locking every ply indiscriminately lets an unrelated line's opponent
+// move silently overwrite our own actual repertoire choice there.
+void TeachRepertoireLine(string args)
+{
+    string[] allTokens = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    if (allTokens.Length == 0)
+    {
+        Console.WriteLine("Usage: book teach [--as white|black] <move1> <move2> ...");
+        return;
+    }
+
+    Color? recordOnlyFor = null;
+    int start = 0;
+
+    if (allTokens[0].Equals("--as", StringComparison.OrdinalIgnoreCase))
+    {
+        if (allTokens.Length < 2 ||
+            !TryParseColor(allTokens[1], out Color parsedColor))
+        {
+            Console.WriteLine("Usage: book teach --as white|black <move1> <move2> ...");
+            return;
+        }
+
+        recordOnlyFor = parsedColor;
+        start = 2;
+    }
+
+    string[] tokens = allTokens[start..];
+    if (tokens.Length == 0)
+    {
+        Console.WriteLine("Usage: book teach [--as white|black] <move1> <move2> ...");
+        return;
+    }
+
+    Board teachBoard = Board.CreateStartingPosition();
+    int processed = 0;
+    int locked = 0;
+
+    foreach (string token in tokens)
+    {
+        Move? teachMove = null;
+        foreach (IMoveParser parser in moveParsers)
+        {
+            if (parser.TryParse(teachBoard, token, out Move candidate))
+            {
+                teachMove = candidate;
+                break;
+            }
+        }
+
+        if (teachMove is null)
+        {
+            Console.WriteLine($"Teach stopped: '{token}' is not legal after {processed} move(s).");
+            break;
+        }
+
+        if (recordOnlyFor is null || teachBoard.SideToMove == recordOnlyFor)
+        {
+            openingBook.Record(teachBoard, teachMove.Value, locked: true);
+            locked++;
+        }
+
+        teachBoard.ApplyMove(teachMove.Value);
+        processed++;
+    }
+
+    if (locked == 0) return;
+
+    openingBook.Save(bookPath);
+    string scope = recordOnlyFor?.ToString() ?? "both sides";
+    Console.WriteLine($"Taught and locked {locked} position(s) as {scope} (from {processed} move(s) played). Opening book: {openingBook.Count} total -> {bookPath}");
+}
+
+static bool TryParseColor(string text, out Color color)
+{
+    if (text.Equals("white", StringComparison.OrdinalIgnoreCase)) { color = Color.White; return true; }
+    if (text.Equals("black", StringComparison.OrdinalIgnoreCase)) { color = Color.Black; return true; }
+    color = default;
+    return false;
 }
 
 static string FormatMoveText(List<string> history, Color startingSide, int startingFullmove)

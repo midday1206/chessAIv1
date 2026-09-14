@@ -1,8 +1,10 @@
+using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using ChessEngine.Cli;
 using ChessEngine.Core;
+using ChessEngine.Core.Book;
 using ChessEngine.Core.Evaluation;
 using ChessEngine.Core.Moves;
 using ChessEngine.Core.Notation;
@@ -31,6 +33,30 @@ IMoveParser[] moveParsers = { new SanMoveParser(), new UciMoveParser() };
 
 IMoveSearcher searcher = new MinimaxSearch(new PieceSquareEvaluator());
 const int defaultSearchDepth = 4;
+
+// As material comes off the board the branching factor shrinks a lot, and endgame technique
+// (king activity, opposition, pawn races) often needs more than a few plies of lookahead to
+// get right - so search noticeably deeper once the position has simplified, for the same
+// reason a fixed 4-ply budget is fine in the middlegame but not once it's down to king + pawns.
+int SelectSearchDepth(Board b)
+{
+    int phase = GamePhase.Compute(b);
+    if (phase <= 6) return defaultSearchDepth + 4;
+    if (phase <= 12) return defaultSearchDepth + 2;
+    return defaultSearchDepth;
+}
+
+// Opening book: not "whatever was played" - after the game ends, every position from the
+// opening phase (the first bookMaxPlies plies) gets re-analyzed at bookAnalysisDepth (deeper
+// than normal play) and THAT best move is what's stored. Playing/teaching a line once and
+// then quitting is enough to pin it as the repertoire for next time.
+const int bookMaxPlies = 20;
+const int bookAnalysisDepth = defaultSearchDepth + 2;
+string bookPath = Path.Combine(Directory.GetCurrentDirectory(), "opening-book.json");
+OpeningBook openingBook = OpeningBook.Load(bookPath);
+var bookPhasePositions = new List<Board>();
+
+Console.WriteLine($"Opening book: {openingBook.Count} learned position(s) from {bookPath}");
 
 // "Pondering": while we're blocked waiting for the next input (the opponent's thinking
 // time, from the engine's point of view), keep a search for the CURRENT position running
@@ -62,6 +88,7 @@ while (true)
     if (status is GameStatus.Checkmate or GameStatus.Stalemate)
     {
         ponderCts?.Cancel();
+        AnalyzeAndSaveBook();
         return 0;
     }
 
@@ -75,28 +102,37 @@ while (true)
         trimmed.Equals("exit", StringComparison.OrdinalIgnoreCase))
     {
         ponderCts?.Cancel();
+        AnalyzeAndSaveBook();
         return 0;
     }
 
     if (trimmed.Equals("go", StringComparison.OrdinalIgnoreCase) ||
         trimmed.StartsWith("go ", StringComparison.OrdinalIgnoreCase))
     {
-        int depth = defaultSearchDepth;
+        int depth = SelectSearchDepth(board);
         string[] parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length > 1 && int.TryParse(parts[1], out int requestedDepth) && requestedDepth > 0)
             depth = requestedDepth;
 
         Move? engineMove;
-        bool usedPonder = ponderTask is not null && ponderFen == board.ToFen() && ponderDepth == depth;
+        string tag;
 
-        if (usedPonder)
+        if (bookPhasePositions.Count < bookMaxPlies && openingBook.TryGetMove(board, out Move bookMove))
         {
-            engineMove = ponderTask!.GetAwaiter().GetResult();
+            ponderCts?.Cancel();
+            engineMove = bookMove;
+            tag = "book";
+        }
+        else if (ponderTask is not null && ponderFen == board.ToFen() && ponderDepth == depth)
+        {
+            engineMove = ponderTask.GetAwaiter().GetResult();
+            tag = "pondered";
         }
         else
         {
             ponderCts?.Cancel();
             engineMove = searcher.FindBestMove(board, depth);
+            tag = "searched";
         }
 
         if (engineMove is null)
@@ -106,8 +142,9 @@ while (true)
         }
 
         string engineSan = moveFormatter.Format(board, engineMove.Value);
-        Console.WriteLine($"Engine plays: {engineSan} (depth {depth}{(usedPonder ? ", pondered" : "")})");
+        Console.WriteLine($"Engine plays: {engineSan} (depth {depth}, {tag})");
         moveHistory.Add(engineSan);
+        if (bookPhasePositions.Count < bookMaxPlies) bookPhasePositions.Add(board.Clone());
         board.ApplyMove(engineMove.Value);
         continue;
     }
@@ -131,6 +168,7 @@ while (true)
     }
 
     moveHistory.Add(moveFormatter.Format(board, parsedMove.Value));
+    if (bookPhasePositions.Count < bookMaxPlies) bookPhasePositions.Add(board.Clone());
     board.ApplyMove(parsedMove.Value);
 }
 
@@ -143,19 +181,40 @@ void StartPondering(Board currentBoard)
     Board snapshot = currentBoard.Clone();
 
     ponderFen = currentBoard.ToFen();
-    ponderDepth = defaultSearchDepth;
+    ponderDepth = SelectSearchDepth(currentBoard);
 
     ponderTask = Task.Run(() =>
     {
         try
         {
-            return searcher.FindBestMove(snapshot, defaultSearchDepth, token);
+            return searcher.FindBestMove(snapshot, ponderDepth, token);
         }
         catch (OperationCanceledException)
         {
             return null;
         }
     }, token);
+}
+
+void AnalyzeAndSaveBook()
+{
+    if (bookPhasePositions.Count == 0) return;
+
+    Console.WriteLine($"Analyzing {bookPhasePositions.Count} opening position(s) at depth {bookAnalysisDepth} to update the book...");
+
+    for (int i = 0; i < bookPhasePositions.Count; i++)
+    {
+        Board position = bookPhasePositions[i];
+        Move? best = searcher.FindBestMove(position, bookAnalysisDepth);
+        if (best is null) continue;
+
+        string san = moveFormatter.Format(position, best.Value);
+        openingBook.Record(position, best.Value);
+        Console.WriteLine($"  [{i + 1}/{bookPhasePositions.Count}] {position.ToFen()} -> {san}");
+    }
+
+    openingBook.Save(bookPath);
+    Console.WriteLine($"Opening book saved: {openingBook.Count} position(s) -> {bookPath}");
 }
 
 static string FormatMoveText(List<string> history, Color startingSide, int startingFullmove)

@@ -51,4 +51,33 @@ public class PieceSquareEvaluatorTests
 
         Assert.That(_evaluator.Evaluate(castled), Is.GreaterThan(_evaluator.Evaluate(uncastled)));
     }
+
+    [Test]
+    public void King_PrefersStayingBack_WithFullNonPawnMaterialOnTheBoard()
+    {
+        Board kingOnBackRank = Board.FromFen("rnbqkbnr/8/8/8/8/8/8/RNBQKBNR w - - 0 1");
+        Board kingInTheCenter = Board.FromFen("rnbqkbnr/8/8/8/4K3/8/8/RNBQ1BNR w - - 0 1");
+
+        Assert.That(_evaluator.Evaluate(kingOnBackRank), Is.GreaterThan(_evaluator.Evaluate(kingInTheCenter)));
+    }
+
+    [Test]
+    public void King_PrefersCentralizing_InABareEndgame()
+    {
+        Board kingOnBackRank = Board.FromFen("8/8/8/8/8/8/8/4K3 w - - 0 1");
+        Board kingInTheCenter = Board.FromFen("8/8/8/8/4K3/8/8/8 w - - 0 1");
+
+        Assert.That(_evaluator.Evaluate(kingInTheCenter), Is.GreaterThan(_evaluator.Evaluate(kingOnBackRank)));
+    }
+
+    [Test]
+    public void PassedPawn_OutweighsATableDisadvantage_ComparedToABlockedPawn()
+    {
+        // A black pawn fixed on e6 in both boards (its own contribution cancels out): it
+        // directly blocks a white pawn on e5, but not one on a5, which is passed instead.
+        Board blockedOnE5 = Board.FromFen("8/8/4p3/4P3/8/8/8/8 w - - 0 1");
+        Board passedOnA5 = Board.FromFen("8/8/4p3/P7/8/8/8/8 w - - 0 1");
+
+        Assert.That(_evaluator.Evaluate(passedOnA5), Is.GreaterThan(_evaluator.Evaluate(blockedOnE5)));
+    }
 }

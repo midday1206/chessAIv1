@@ -70,21 +70,24 @@ public sealed class MinimaxSearch : IMoveSearcher
             alpha = Math.Max(alpha, score);
         }
 
-        // Trade-avoidance tie-break: the objectively best move (found above exactly as
-        // plain alpha-beta would) might be a capture, while a quiet move scored close to it.
-        // That quiet move's score above may only be a pruned bound rather than its true
-        // value (tightening alpha across root siblings is what makes this search fast), so
-        // resolve the comparison with one exact, fully-open-window re-search - just for this
-        // single candidate, not per move, which is what made an earlier version of this
-        // check pathologically slow in richer positions.
+        // Trade-avoidance tie-break: the objectively best move (found above exactly as plain
+        // alpha-beta would) might be a capture, while a quiet move scored close to it. That
+        // quiet move's score above may only be a pruned bound rather than its true value
+        // (tightening alpha across root siblings is what makes this search fast), so this
+        // needs a re-search to resolve properly. It only needs to answer one yes/no question
+        // though - "does this quiet move's true value clear the tie threshold?" - so a narrow
+        // window around that threshold (a standard test/null-window search) gets a reliable
+        // answer for a small fraction of the cost a fully open window would take, letting
+        // alpha-beta prune the re-search itself almost as effectively as a normal move.
         if (bestMove is not null && bestMove.Value.IsCapture && bestQuietMove is not null &&
             bestQuietScore > bestScore - TradeAvoidanceMargin - 1)
         {
+            int threshold = bestScore - TradeAvoidanceMargin;
             Board quietNext = board.Clone();
             quietNext.ApplyMove(bestQuietMove.Value);
-            int exactQuietScore = -Negamax(quietNext, depth - 1, -Infinity, Infinity, cancellationToken);
+            int testScore = -Negamax(quietNext, depth - 1, -threshold - 1, -threshold + 1, cancellationToken);
 
-            if (exactQuietScore >= bestScore - TradeAvoidanceMargin)
+            if (testScore >= threshold)
                 return bestQuietMove;
         }
 

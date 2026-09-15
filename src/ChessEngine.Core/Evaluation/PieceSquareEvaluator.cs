@@ -20,8 +20,13 @@ public sealed class PieceSquareEvaluator : IPositionEvaluator
     public int Evaluate(Board board)
     {
         int score = 0;
-        double endgameWeight = GamePhase.EndgameWeight(board);
+        int phase = 0;
+        int whiteKingFile = -1, whiteKingRank = -1;
+        int blackKingFile = -1, blackKingRank = -1;
 
+        // One pass over the board: score every non-king piece immediately and tally the game
+        // phase as we go, deferring only the king (whose table depends on the final phase)
+        // instead of scanning the board a second time just to compute that phase up front.
         for (int rank = 0; rank < Board.BoardSize; rank++)
         {
             for (int file = 0; file < Board.BoardSize; file++)
@@ -29,23 +34,30 @@ public sealed class PieceSquareEvaluator : IPositionEvaluator
                 Piece piece = board.GetPiece(file, rank);
                 if (piece.IsNone) continue;
 
-                int value = PieceValues.Values[piece.Type];
-
                 if (piece.Type == PieceType.King)
                 {
-                    value += PieceSquareTables.GetKingValue(piece.Color, file, rank, endgameWeight);
+                    if (piece.Color == Color.White) (whiteKingFile, whiteKingRank) = (file, rank);
+                    else (blackKingFile, blackKingRank) = (file, rank);
+                    continue;
                 }
-                else
-                {
-                    value += PieceSquareTables.GetValue(piece.Type, piece.Color, file, rank);
 
-                    if (piece.Type == PieceType.Pawn && IsPassedPawn(board, file, rank, piece.Color))
-                        value += PassedPawnBonus(piece.Color, rank);
-                }
+                phase += GamePhase.WeightOf(piece.Type);
+
+                int value = PieceValues.Values[piece.Type] + PieceSquareTables.GetValue(piece.Type, piece.Color, file, rank);
+
+                if (piece.Type == PieceType.Pawn && IsPassedPawn(board, file, rank, piece.Color))
+                    value += PassedPawnBonus(piece.Color, rank);
 
                 score += piece.Color == Color.White ? value : -value;
             }
         }
+
+        double endgameWeight = GamePhase.EndgameWeightFromPhase(phase);
+
+        if (whiteKingFile >= 0)
+            score += PieceValues.Values[PieceType.King] + PieceSquareTables.GetKingValue(Color.White, whiteKingFile, whiteKingRank, endgameWeight);
+        if (blackKingFile >= 0)
+            score -= PieceValues.Values[PieceType.King] + PieceSquareTables.GetKingValue(Color.Black, blackKingFile, blackKingRank, endgameWeight);
 
         return score;
     }

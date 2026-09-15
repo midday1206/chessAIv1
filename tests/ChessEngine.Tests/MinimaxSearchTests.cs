@@ -78,6 +78,34 @@ public class MinimaxSearchTests
     }
 
     [Test]
+    public void FindBestMove_PrefersAQuietMove_OverAnEquallyEvaluatedTrade()
+    {
+        // Rxa6 bxa6 is a perfectly even rook trade - the material balance afterward is
+        // identical to just leaving the position alone - so the engine should keep the
+        // tension on the board instead of simplifying for no actual gain.
+        Board board = Board.FromFen("4k3/1p6/r7/8/8/8/8/R3K3 w - - 0 1");
+
+        Move? move = _search.FindBestMove(board, depth: 1);
+
+        Assert.That(move, Is.Not.Null);
+        Assert.That(move!.Value.IsCapture, Is.False);
+    }
+
+    [Test]
+    public void FindBestMove_StillTakesAClearlyWinningTrade()
+    {
+        // An undefended knight is a real material gain, not a near-tie, so the trade-avoidance
+        // tie-break must not suppress it.
+        Board board = Board.FromFen("4k3/8/n7/8/8/8/8/R3K3 w - - 0 1");
+
+        Move? move = _search.FindBestMove(board, depth: 1);
+
+        Assert.That(move, Is.Not.Null);
+        Assert.That(move!.Value.To, Is.EqualTo(Square.FromAlgebraic("a6")));
+        Assert.That(move.Value.IsCapture, Is.True);
+    }
+
+    [Test]
     public void FindBestMove_AtShallowDepth_StillAvoidsABadTradeThanksToQuiescence()
     {
         // Same trap as FindBestMove_AvoidsACaptureThatLosesTheQueenForLess, but searched to

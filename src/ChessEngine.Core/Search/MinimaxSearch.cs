@@ -22,6 +22,12 @@ public sealed class MinimaxSearch : IMoveSearcher
     private const int Infinity = int.MaxValue;
     private const int MaxQuiescenceDepth = 4;
 
+    // At the root, a move scoring within this many centipawns of the best found is treated
+    // as an effective tie. Among ties, a non-capturing move is preferred over a capture -
+    // if trading down doesn't actually score any better, don't simplify the position, since
+    // this engine's edge is calculation and calculation matters more with more on the board.
+    private const int TradeAvoidanceMargin = 20;
+
     private readonly IPositionEvaluator _evaluator;
 
     public MinimaxSearch(IPositionEvaluator evaluator) => _evaluator = evaluator;
@@ -36,6 +42,8 @@ public sealed class MinimaxSearch : IMoveSearcher
 
         Move? bestMove = null;
         int bestScore = -Infinity;
+        Move? bestQuietMove = null;
+        int bestQuietScore = -Infinity;
         int alpha = -Infinity;
         const int beta = Infinity;
 
@@ -53,7 +61,31 @@ public sealed class MinimaxSearch : IMoveSearcher
                 bestMove = move;
             }
 
+            if (!move.IsCapture && (bestQuietMove is null || score > bestQuietScore))
+            {
+                bestQuietScore = score;
+                bestQuietMove = move;
+            }
+
             alpha = Math.Max(alpha, score);
+        }
+
+        // Trade-avoidance tie-break: the objectively best move (found above exactly as
+        // plain alpha-beta would) might be a capture, while a quiet move scored close to it.
+        // That quiet move's score above may only be a pruned bound rather than its true
+        // value (tightening alpha across root siblings is what makes this search fast), so
+        // resolve the comparison with one exact, fully-open-window re-search - just for this
+        // single candidate, not per move, which is what made an earlier version of this
+        // check pathologically slow in richer positions.
+        if (bestMove is not null && bestMove.Value.IsCapture && bestQuietMove is not null &&
+            bestQuietScore > bestScore - TradeAvoidanceMargin - 1)
+        {
+            Board quietNext = board.Clone();
+            quietNext.ApplyMove(bestQuietMove.Value);
+            int exactQuietScore = -Negamax(quietNext, depth - 1, -Infinity, Infinity, cancellationToken);
+
+            if (exactQuietScore >= bestScore - TradeAvoidanceMargin)
+                return bestQuietMove;
         }
 
         return bestMove;

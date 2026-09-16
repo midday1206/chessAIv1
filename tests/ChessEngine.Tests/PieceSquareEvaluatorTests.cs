@@ -120,4 +120,32 @@ public class PieceSquareEvaluatorTests
 
         Assert.That(_evaluator.Evaluate(pushesAwayFromKing), Is.GreaterThan(_evaluator.Evaluate(pushesInFrontOfKing)));
     }
+
+    [Test]
+    public void FianchettoPawn_CoversTheFile_EvenWithAnEnemyRookBehindIt()
+    {
+        // g3 isn't a "shield pawn one or two ranks ahead" in the strict sense, but it still
+        // physically blocks the g-file - a black rook can't see past it no matter which side
+        // of the board it's parked on. Keeping the same rook on the board in both cases (just
+        // relocated) holds the game phase identical, and a8/g8 share the same table value, so
+        // these two boards should evaluate identically if the fianchetto is correctly treated
+        // as covering the file rather than as an open one the rook is bearing down on.
+        Board rookUnrelated = Board.FromFen("r3k3/8/8/8/8/6P1/8/3Q1RK1 w - - 0 1");
+        Board rookBehindTheFianchetto = Board.FromFen("4k1r1/8/8/8/8/6P1/8/3Q1RK1 w - - 0 1");
+
+        Assert.That(_evaluator.Evaluate(rookBehindTheFianchetto), Is.EqualTo(_evaluator.Evaluate(rookUnrelated)));
+    }
+
+    [Test]
+    public void OpenFileNearTheKing_OnlyCostsItsFullPenalty_OnceAnEnemyPieceActuallyBearsDownOnIt()
+    {
+        // Same fully-open g-file in both boards (g2 and g7 both missing) - the only
+        // difference is where Black's rook sits. Parked on a8 it isn't attacking anything
+        // near White's king yet, so the weakness is only latent; moved to g8, with a clear
+        // file straight down, it's actually bearing down on g1/g2 right now.
+        Board latentWeakness = Board.FromFen("r3k3/pppppp1p/8/8/8/8/PPPPPP1P/RNBQ1RK1 w - - 0 1");
+        Board activeAttack = Board.FromFen("4k1r1/pppppp1p/8/8/8/8/PPPPPP1P/RNBQ1RK1 w - - 0 1");
+
+        Assert.That(_evaluator.Evaluate(latentWeakness), Is.GreaterThan(_evaluator.Evaluate(activeAttack)));
+    }
 }

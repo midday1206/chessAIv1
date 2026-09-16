@@ -1,4 +1,5 @@
 using System;
+using ChessEngine.Core.Moves;
 
 namespace ChessEngine.Core.Evaluation;
 
@@ -133,18 +134,20 @@ public sealed class PieceSquareEvaluator : IPositionEvaluator
     }
 
     /// <summary>
-    /// Penalizes a thin or missing pawn shield on the king's own file and its two neighbors:
-    /// a file with no pawn in front of the king at all costs more than one that merely lacks
-    /// a same-color shield pawn there (e.g. it's been traded or pushed past).
+    /// Penalizes a thin or missing pawn shield on the king's own file and its two neighbors -
+    /// but only in proportion to whether the opponent can currently actually aim pieces at
+    /// it. An open file the opponent has no pieces pointed at yet is just a latent weakness
+    /// (worth a small, structural nudge); the same file with enemy pieces already attacking
+    /// squares next to the king is a live danger and gets close to the full penalty.
     /// </summary>
     private static int KingSafetyPenalty(Board board, Color color, int kingFile, int kingRank)
     {
-        int direction = color == Color.White ? 1 : -1;
-        int penalty = 0;
+        int openFiles = 0;
+        int semiOpenFiles = 0;
 
         for (int f = Math.Max(0, kingFile - 1); f <= Math.Min(Board.BoardSize - 1, kingFile + 1); f++)
         {
-            bool hasShieldPawn = false;
+            bool hasOwnPawnOnFile = false;
             bool hasAnyPawnOnFile = false;
 
             for (int r = 0; r < Board.BoardSize; r++)
@@ -153,16 +156,56 @@ public sealed class PieceSquareEvaluator : IPositionEvaluator
                 if (piece.Type != PieceType.Pawn) continue;
 
                 hasAnyPawnOnFile = true;
-
-                int distanceAhead = (r - kingRank) * direction;
-                if (piece.Color == color && distanceAhead is >= 1 and <= 2)
-                    hasShieldPawn = true;
+                // Deliberately lenient about *where* on the file the pawn sits: a fianchetto
+                // pawn (e.g. g6, whether the king is on g1 or has walked up to g7) still
+                // covers that file just fine, even though it isn't one or two ranks ahead of
+                // the king the way a textbook shield pawn would be.
+                if (piece.Color == color) hasOwnPawnOnFile = true;
             }
 
-            if (!hasShieldPawn)
-                penalty += hasAnyPawnOnFile ? MissingShieldPawnPenalty : OpenFileNearKingPenalty;
+            if (!hasOwnPawnOnFile)
+            {
+                if (hasAnyPawnOnFile) semiOpenFiles++;
+                else openFiles++;
+            }
         }
 
-        return penalty;
+        int structuralWeakness = (openFiles * OpenFileNearKingPenalty) + (semiOpenFiles * MissingShieldPawnPenalty);
+        if (structuralWeakness == 0) return 0;
+
+        double attackPressure = KingZoneAttackPressure(board, color, kingFile, kingRank);
+
+        // An unexploited weakness still counts for something (it's an invitation), but the
+        // bulk of the penalty only applies once the opponent's pieces are actually bearing
+        // down on the king's own squares.
+        double scale = LatentWeaknessFloor + ((1 - LatentWeaknessFloor) * attackPressure);
+        return (int)Math.Round(structuralWeakness * scale);
+    }
+
+    private const double LatentWeaknessFloor = 0.25;
+
+    /// <summary>Fraction of the king's own 3x3 zone that the opponent currently attacks.</summary>
+    private static double KingZoneAttackPressure(Board board, Color color, int kingFile, int kingRank)
+    {
+        Color attacker = color == Color.White ? Color.Black : Color.White;
+        int minFile = Math.Max(0, kingFile - 1);
+        int maxFile = Math.Min(Board.BoardSize - 1, kingFile + 1);
+        int minRank = Math.Max(0, kingRank - 1);
+        int maxRank = Math.Min(Board.BoardSize - 1, kingRank + 1);
+
+        int total = 0;
+        int attacked = 0;
+
+        for (int f = minFile; f <= maxFile; f++)
+        {
+            for (int r = minRank; r <= maxRank; r++)
+            {
+                total++;
+                if (MoveGenerator.IsSquareAttacked(board, new Square(f, r), attacker))
+                    attacked++;
+            }
+        }
+
+        return total == 0 ? 0 : (double)attacked / total;
     }
 }

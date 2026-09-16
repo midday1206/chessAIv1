@@ -5,59 +5,88 @@ namespace ChessEngine.Core.Evaluation;
 /// <summary>
 /// Scores a position by material plus piece-square placement bonuses (PieceSquareTables),
 /// so the engine values central control, pawn advancement, and early king safety rather
-/// than treating every legal move as equally good. Two things are tapered by GamePhase
+/// than treating every legal move as equally good. Several things are tapered by GamePhase
 /// instead of using one fixed value everywhere:
 ///  - the king's table blends from "stay safe behind castled pawns" (middlegame) to
 ///    "get active and centralize" (endgame) as material comes off the board;
 ///  - passed pawns get a bonus that grows sharply the closer they are to promoting, which
-///    matters far more once there's little material left to stop them.
+///    matters far more once there's little material left to stop them;
+///  - a king's own pawn shield (or lack of one) is only worth penalizing while there's
+///    enough material left on the board to actually exploit an open king;
+///  - pushing pawns on the wing away from your own king (a pawn storm) is only worth
+///    rewarding for the same reason.
 /// </summary>
 public sealed class PieceSquareEvaluator : IPositionEvaluator
 {
     // Indexed by ranks advanced from that pawn's own starting side (0 = never moved, 7 = promoted).
     private static readonly int[] PassedPawnBonusByAdvancement = { 0, 0, 10, 20, 40, 70, 120, 200 };
+    private static readonly int[] PawnStormBonusByAdvancement = { 0, 0, 5, 12, 22, 35, 50, 0 };
+
+    private const int MissingShieldPawnPenalty = 15;
+    private const int OpenFileNearKingPenalty = 30;
 
     public int Evaluate(Board board)
     {
-        int score = 0;
-        int phase = 0;
-        int whiteKingFile = -1, whiteKingRank = -1;
-        int blackKingFile = -1, blackKingRank = -1;
+        (int file, int rank)? whiteKing = null;
+        (int file, int rank)? blackKing = null;
 
-        // One pass over the board: score every non-king piece immediately and tally the game
-        // phase as we go, deferring only the king (whose table depends on the final phase)
-        // instead of scanning the board a second time just to compute that phase up front.
+        // Pawn-storm scoring needs to know each side's own king file while it's still walking
+        // the board, so find both kings first rather than deferring them to the end like the
+        // (phase-dependent) king table value still is below.
         for (int rank = 0; rank < Board.BoardSize; rank++)
         {
             for (int file = 0; file < Board.BoardSize; file++)
             {
                 Piece piece = board.GetPiece(file, rank);
-                if (piece.IsNone) continue;
+                if (piece.Type != PieceType.King) continue;
 
-                if (piece.Type == PieceType.King)
-                {
-                    if (piece.Color == Color.White) (whiteKingFile, whiteKingRank) = (file, rank);
-                    else (blackKingFile, blackKingRank) = (file, rank);
-                    continue;
-                }
+                if (piece.Color == Color.White) whiteKing = (file, rank);
+                else blackKing = (file, rank);
+            }
+        }
+
+        int score = 0;
+        int phase = 0;
+
+        for (int rank = 0; rank < Board.BoardSize; rank++)
+        {
+            for (int file = 0; file < Board.BoardSize; file++)
+            {
+                Piece piece = board.GetPiece(file, rank);
+                if (piece.IsNone || piece.Type == PieceType.King) continue;
 
                 phase += GamePhase.WeightOf(piece.Type);
 
                 int value = PieceValues.Values[piece.Type] + PieceSquareTables.GetValue(piece.Type, piece.Color, file, rank);
 
-                if (piece.Type == PieceType.Pawn && IsPassedPawn(board, file, rank, piece.Color))
-                    value += PassedPawnBonus(piece.Color, rank);
+                if (piece.Type == PieceType.Pawn)
+                {
+                    if (IsPassedPawn(board, file, rank, piece.Color))
+                        value += PassedPawnBonus(piece.Color, rank);
+
+                    (int file, int rank)? ownKing = piece.Color == Color.White ? whiteKing : blackKing;
+                    if (ownKing is { } king && IsOnAttackingWing(file, king.file))
+                        value += PawnStormBonus(piece.Color, rank);
+                }
 
                 score += piece.Color == Color.White ? value : -value;
             }
         }
 
         double endgameWeight = GamePhase.EndgameWeightFromPhase(phase);
+        double middlegameWeight = 1 - endgameWeight;
 
-        if (whiteKingFile >= 0)
-            score += PieceValues.Values[PieceType.King] + PieceSquareTables.GetKingValue(Color.White, whiteKingFile, whiteKingRank, endgameWeight);
-        if (blackKingFile >= 0)
-            score -= PieceValues.Values[PieceType.King] + PieceSquareTables.GetKingValue(Color.Black, blackKingFile, blackKingRank, endgameWeight);
+        if (whiteKing is { } wk)
+        {
+            score += PieceValues.Values[PieceType.King] + PieceSquareTables.GetKingValue(Color.White, wk.file, wk.rank, endgameWeight);
+            score -= (int)Math.Round(KingSafetyPenalty(board, Color.White, wk.file, wk.rank) * middlegameWeight);
+        }
+
+        if (blackKing is { } bk)
+        {
+            score -= PieceValues.Values[PieceType.King] + PieceSquareTables.GetKingValue(Color.Black, bk.file, bk.rank, endgameWeight);
+            score += (int)Math.Round(KingSafetyPenalty(board, Color.Black, bk.file, bk.rank) * middlegameWeight);
+        }
 
         return score;
     }
@@ -88,5 +117,52 @@ public sealed class PieceSquareEvaluator : IPositionEvaluator
     {
         int advancement = color == Color.White ? rank : Board.BoardSize - 1 - rank;
         return PassedPawnBonusByAdvancement[advancement];
+    }
+
+    /// <summary>True when the file is on the opposite side of the board from the king's own file.</summary>
+    private static bool IsOnAttackingWing(int pawnFile, int kingFile)
+    {
+        bool kingIsQueenside = kingFile <= 3;
+        return kingIsQueenside ? pawnFile >= 4 : pawnFile <= 3;
+    }
+
+    private static int PawnStormBonus(Color color, int rank)
+    {
+        int advancement = color == Color.White ? rank : Board.BoardSize - 1 - rank;
+        return PawnStormBonusByAdvancement[advancement];
+    }
+
+    /// <summary>
+    /// Penalizes a thin or missing pawn shield on the king's own file and its two neighbors:
+    /// a file with no pawn in front of the king at all costs more than one that merely lacks
+    /// a same-color shield pawn there (e.g. it's been traded or pushed past).
+    /// </summary>
+    private static int KingSafetyPenalty(Board board, Color color, int kingFile, int kingRank)
+    {
+        int direction = color == Color.White ? 1 : -1;
+        int penalty = 0;
+
+        for (int f = Math.Max(0, kingFile - 1); f <= Math.Min(Board.BoardSize - 1, kingFile + 1); f++)
+        {
+            bool hasShieldPawn = false;
+            bool hasAnyPawnOnFile = false;
+
+            for (int r = 0; r < Board.BoardSize; r++)
+            {
+                Piece piece = board.GetPiece(f, r);
+                if (piece.Type != PieceType.Pawn) continue;
+
+                hasAnyPawnOnFile = true;
+
+                int distanceAhead = (r - kingRank) * direction;
+                if (piece.Color == color && distanceAhead is >= 1 and <= 2)
+                    hasShieldPawn = true;
+            }
+
+            if (!hasShieldPawn)
+                penalty += hasAnyPawnOnFile ? MissingShieldPawnPenalty : OpenFileNearKingPenalty;
+        }
+
+        return penalty;
     }
 }

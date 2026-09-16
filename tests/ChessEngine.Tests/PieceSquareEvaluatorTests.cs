@@ -80,4 +80,44 @@ public class PieceSquareEvaluatorTests
 
         Assert.That(_evaluator.Evaluate(passedOnA5), Is.GreaterThan(_evaluator.Evaluate(blockedOnE5)));
     }
+
+    [Test]
+    public void IntactPawnShield_ScoresHigherThanAHoleInIt_WithFullMaterial()
+    {
+        // The g2 shield pawn is relocated to a4 (not removed), so material is identical -
+        // only whether the king's own file still has a shield pawn in front of it changes.
+        Board intactShield = Board.FromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQ1RK1 w kq - 0 1");
+        Board holedShield = Board.FromFen("rnbqkbnr/pppppppp/8/8/P7/8/PPPPPP1P/RNBQ1RK1 w kq - 0 1");
+
+        Assert.That(_evaluator.Evaluate(intactShield), Is.GreaterThan(_evaluator.Evaluate(holedShield)));
+    }
+
+    [Test]
+    public void PawnShieldHole_CostsFarLess_InABareEndgame()
+    {
+        // Same shield hole (g2 relocated to a4) as above, but compare how much it costs with
+        // full material still on the board versus a bare king+pawn ending (phase 0) - king
+        // safety should fade out almost entirely once there's little left to exploit it with.
+        Board middlegameIntact = Board.FromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQ1RK1 w kq - 0 1");
+        Board middlegameHoled = Board.FromFen("rnbqkbnr/pppppppp/8/8/P7/8/PPPPPP1P/RNBQ1RK1 w kq - 0 1");
+        Board endgameIntact = Board.FromFen("4k3/8/8/8/8/8/5PPP/6K1 w - - 0 1");
+        Board endgameHoled = Board.FromFen("4k3/8/8/8/P7/8/5P1P/6K1 w - - 0 1");
+
+        int middlegameGap = _evaluator.Evaluate(middlegameIntact) - _evaluator.Evaluate(middlegameHoled);
+        int endgameGap = _evaluator.Evaluate(endgameIntact) - _evaluator.Evaluate(endgameHoled);
+
+        Assert.That(middlegameGap, Is.GreaterThan(endgameGap));
+    }
+
+    [Test]
+    public void PawnStorm_OnTheWingAwayFromItsOwnKing_ScoresHigherThanPushingInFrontOfIt()
+    {
+        // The pawn table itself is left-right symmetric, so b4 and g4 carry the same raw
+        // placement bonus - only the storm bonus (queenside push while castled kingside)
+        // should be able to separate these two boards.
+        Board pushesAwayFromKing = Board.FromFen("rnbqkbnr/pppppppp/8/8/1P6/8/P1PPPPPP/RNBQ1RK1 w kq - 0 1");
+        Board pushesInFrontOfKing = Board.FromFen("rnbqkbnr/pppppppp/8/8/6P1/8/PPPPPP1P/RNBQ1RK1 w kq - 0 1");
+
+        Assert.That(_evaluator.Evaluate(pushesAwayFromKing), Is.GreaterThan(_evaluator.Evaluate(pushesInFrontOfKing)));
+    }
 }
